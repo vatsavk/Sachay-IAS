@@ -119,7 +119,7 @@ def api_client():
     original_db = sanchay_db.DB_PATH
     sanchay_db.DB_PATH = TEST_DB_PATH
     
-    client = TestClient(app)
+    client = TestClient(app, raise_server_exceptions=True)
     yield client
     
     sanchay_db.DB_PATH = original_db
