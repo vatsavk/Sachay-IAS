@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: sanchay_admin
+      POSTGRES_PASSWORD: secureadmin2026
+      POSTGRES_DB: sanchay_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  web:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://sanchay_admin:secureadmin2026@db:5432/sanchay_db
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

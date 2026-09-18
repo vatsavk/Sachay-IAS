@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SANCHAY SENTINEL — Logic Verification Suite</title>
+    <style>
+        :root {
+            --bg: #0f172a; --card: #1e293b; --accent: #d4af37; --text: #f8fafc;
+            --pass: #22c55e; --fail: #ef4444; --warn: #f59e0b;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family: 'Inter', sans-serif; }
+        body { background: var(--bg); color: var(--text); padding: 40px; }
+        
+        .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:40px; }
+        .title { font-size:24px; font-weight:800; letter-spacing:-0.5px; }
+        .badge { background:rgba(212,175,55,0.1); color:var(--accent); padding:4px 12px; border-radius:40px; font-size:12px; font-weight:600; }
+        
+        .summary-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:20px; margin-bottom:40px; }
+        .stat-card { background:var(--card); padding:24px; border-radius:12px; border:1px solid rgba(255,255,255,0.05); }
+        .stat-val { font-size:32px; font-weight:800; margin-bottom:4px; }
+        .stat-label { font-size:12px; color:rgba(255,255,255,0.4); text-transform:uppercase; font-weight:600; }
+
+        .log-container { background:var(--card); border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.05); }
+        .log-header { padding:16px 24px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; }
+        .log-item { padding:14px 24px; border-bottom:1px solid rgba(255,255,255,0.02); display:flex; align-items:center; gap:16px; font-size:13px; }
+        .status-dot { width:8px; height:8px; border-radius:50%; }
+        .cat-tag { font-size:10px; padding:2px 8px; background:rgba(255,255,255,0.1); border-radius:4px; color:rgba(255,255,255,0.6); }
+        .diag { color:rgba(255,255,255,0.4); margin-left:auto; font-family: monospace; font-size:11px; }
+
+        .progress-bar { height:4px; background:rgba(255,255,255,0.05); margin-bottom:40px; border-radius:2px; overflow:hidden; }
+        #progress-inner { height:100%; width:0%; background:var(--accent); transition: width 0.3s ease; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <div class="title">SANCHAY SENTINEL</div>
+            <div style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:4px">Unified Logic & System Verification Dashboard</div>
+        </div>
+        <div class="badge">CERTIFIED ENGINE v1.0.4</div>
+    </div>
+
+    <div class="summary-grid">
+        <div class="stat-card">
+            <div class="stat-val" id="total-tests">0</div>
+            <div class="stat-label">Total Assertions</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-val" style="color:var(--pass)" id="passed-tests">0</div>
+            <div class="stat-label">Passed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-val" style="color:var(--fail)" id="failed-tests">0</div>
+            <div class="stat-label">Failed</div>
+        </div>
+    </div>
+
+    <div class="progress-bar"><div id="progress-inner"></div></div>
+
+    <div class="log-container">
+        <div class="log-header">
+            <span style="font-weight:600; font-size:14px">Audit Logs</span>
+            <span id="run-time" style="font-size:11px; opacity:0.4"></span>
+        </div>
+        <div id="log-body"></div>
+    </div>
+
+    <!-- Required Scripts -->
+    <script src="data.js"></script>
+    <script src="engines.js"></script>
+    <script src="sentinel.js"></script>
+
+    <script>
+        window.addEventListener('load', () => {
+            if (!window.Sentinel) {
+                document.body.innerHTML = '<h1>Error: Sentinel.js not loaded</h1>';
+                return;
+            }
+
+            const results = Sentinel.runAll();
+            
+            // Update Stats
+            document.getElementById('total-tests').innerText = results.summary.total;
+            document.getElementById('passed-tests').innerText = results.summary.passed;
+            document.getElementById('failed-tests').innerText = results.summary.failed;
+            document.getElementById('run-time').innerText = 'Last Run: ' + new Date().toLocaleTimeString();
+            document.getElementById('progress-inner').style.width = '100%';
+
+            const logBody = document.getElementById('log-body');
+            results.details.forEach(res => {
+                const item = document.createElement('div');
+                item.className = 'log-item';
+                
+                const dot = `<div class="status-dot" style="background:${res.passed ? 'var(--pass)' : 'var(--fail)'}"></div>`;
+                const tag = `<div class="cat-tag">${res.category}</div>`;
+                const label = `<div style="font-weight:500">${res.label}</div>`;
+                
+                let diagText = '';
+                if(res.actual) diagText = `Exp: ${res.expected} | Act: ${res.actual}`;
+                const diag = `<div class="diag">${diagText}</div>`;
+
+                item.innerHTML = `${dot} ${tag} ${label} ${diag}`;
+                logBody.appendChild(item);
+            });
+        });
+    </script>
+</body>
+</html>

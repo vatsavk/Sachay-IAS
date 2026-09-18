@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h1>Syntax Check</h1>
+  <pre id="output"></pre>
+  <script>
+    window.addEventListener('error', function(e) {
+      document.getElementById('output').innerText += '\nError: ' + e.message + ' at line ' + e.lineno;
+    });
+  </script>
+  <script src="app.js?v=3"></script>
+</body>
+</html>

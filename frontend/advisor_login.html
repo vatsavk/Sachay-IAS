@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advisor Login - SANCHAY IAS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="login-container fade-in-up">
+            <div class="glass-card">
+                <div class="brand-header">
+                    <span class="portal-badge">Firm & Advisor Portal</span>
+                    <h1>SANCHAY IAS</h1>
+                    <p>Manage your clients and portfolios securely.</p>
+                </div>
+
+                <div id="alert-box" class="alert alert-error"></div>
+
+                <form id="login-form">
+                    <div class="input-group">
+                        <label for="email">Work Email</label>
+                        <input type="email" id="email" class="input-control" placeholder="advisor@sanchay.io" required>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" class="input-control" placeholder="••••••••" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="login-btn">Secure Login</button>
+                </form>
+                
+                <div style="text-align: center; margin-top: 1.5rem;">
+                    <a href="client_login.html" style="color: var(--primary); text-decoration: none; font-size: 0.875rem; font-weight: 500;">Are you a client? Login here</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const alertBox = document.getElementById('alert-box');
+            btn.textContent = 'Authenticating...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch(window.SANCHAY_CONFIG.getAPIUrl('/auth/login'), {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) throw new Error(data.detail || 'Login failed');
+                
+                // Store token and role
+                localStorage.setItem('sanchay_token', data.access_token);
+                localStorage.setItem('sanchay_role', data.role);
+                localStorage.setItem('sanchay_name', data.name);
+                if (data.advisor_id) localStorage.setItem('sanchay_advisor_id', data.advisor_id);
+                
+                // Redirect based on role — index.html is in root, one level up
+                if (data.role === 'client') {
+                    window.location.href = 'client_portal.html';
+                } else {
+                    window.location.href = '../index.html';
+                }
+            } catch (err) {
+                alertBox.textContent = err.message;
+                alertBox.style.display = 'block';
+                btn.textContent = 'Secure Login';
+                btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

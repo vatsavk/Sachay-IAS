@@ -1,0 +1,221 @@
+# ============================================================
+# SANCHAY - UNIFIED DATA INGESTION ENGINE (FREE SOURCES ONLY)
+# ============================================================
+
+import requests
+import time
+import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
+
+# -------------------------------
+# CONFIG
+# -------------------------------
+
+SYMBOLS = ["INFY", "TCS", "RELIANCE"]
+
+# -------------------------------
+# BASE SCHEDULER ENGINE
+# -------------------------------
+
+TASKS = []
+executor = ThreadPoolExecutor(max_workers=10)
+
+def register_task(func, interval_sec):
+    TASKS.append({
+        "func": func,
+        "interval": interval_sec,
+        "last_run": 0
+    })
+
+def scheduler():
+    while True:
+        now = time.time()
+        for task in TASKS:
+            if now - task["last_run"] >= task["interval"]:
+                task["last_run"] = now
+                executor.submit(task["func"])
+        time.sleep(5)
+
+# ============================================================
+# 1. NSE ADAPTER (PRIMARY PRICE SOURCE)
+# ============================================================
+
+class NSEAdapter:
+
+    BASE = "https://www.nseindia.com"
+    QUOTE = "https://www.nseindia.com/api/quote-equity"
+
+    def __init__(self):
+        self.session = requests.Session()
+        self._init_session()
+
+    def _init_session(self):
+        self.session.get(self.BASE, headers={"User-Agent": "Mozilla/5.0"})
+
+    def get_price(self, symbol):
+        url = f"{self.QUOTE}?symbol={symbol}"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": self.BASE,
+            "Accept": "application/json"
+        }
+        r = self.session.get(url, headers=headers, timeout=5)
+        data = r.json()
+
+        return {
+            "symbol": symbol,
+            "price": data["priceInfo"]["lastPrice"],
+            "timestamp": data["priceInfo"]["lastUpdateTime"]
+        }
+
+# ============================================================
+# 2. YAHOO FALLBACK
+# ============================================================
+
+class YahooAdapter:
+
+    URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+
+    def get_price(self, symbol):
+        r = requests.get(self.URL, params={"symbols": f"{symbol}.NS"})
+        data = r.json()["quoteResponse"]["result"][0]
+
+        return {
+            "symbol": symbol,
+            "price": data["regularMarketPrice"],
+            "timestamp": data["regularMarketTime"]
+        }
+
+# ============================================================
+# 3. PRICE PIPELINE (WITH FALLBACK)
+# ============================================================
+
+nse = NSEAdapter()
+yahoo = YahooAdapter()
+
+def fetch_stock_prices():
+    for symbol in SYMBOLS:
+        try:
+            data = nse.get_price(symbol)
+        except Exception:
+            data = yahoo.get_price(symbol)
+
+        print("PRICE:", data)
+        time.sleep(2)
+
+# ============================================================
+# 4. FUNDAMENTALS PIPELINE (YAHOO)
+# ============================================================
+
+def fetch_fundamentals():
+    for symbol in SYMBOLS:
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}.NS"
+        params = {"modules": "financialData,defaultKeyStatistics"}
+
+        r = requests.get(url, params=params)
+        data = r.json()["quoteSummary"]["result"][0]
+
+        result = {
+            "symbol": symbol,
+            "pe": data["defaultKeyStatistics"].get("trailingPE", {}).get("raw"),
+            "eps": data["defaultKeyStatistics"].get("trailingEps", {}).get("raw"),
+            "market_cap": data["financialData"].get("marketCap", {}).get("raw")
+        }
+
+        print("FUNDAMENTALS:", result)
+
+# ============================================================
+# 5. CORPORATE ACTIONS
+# ============================================================
+
+def fetch_corporate_actions():
+    url = "https://www.nseindia.com/api/corporates-corporateActions?index=equities"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.nseindia.com"
+    }
+
+    r = requests.get(url, headers=headers)
+    data = r.json()["data"]
+
+    actions = [{
+        "symbol": x["symbol"],
+        "action": x["purpose"],
+        "ex_date": x["exDate"]
+    } for x in data]
+
+    print("CORPORATE ACTIONS:", actions[:5])
+
+# ============================================================
+# 6. AMFI NAV PIPELINE
+# ============================================================
+
+def fetch_nav():
+    url = "https://www.amfiindia.com/spages/NAVAll.txt"
+
+    r = requests.get(url)
+    lines = r.text.split("\n")
+
+    nav_data = []
+    for line in lines:
+        parts = line.split(";")
+        if len(parts) > 5:
+            nav_data.append({
+                "scheme_code": parts[0],
+                "scheme_name": parts[3],
+                "nav": parts[4],
+                "date": parts[5]
+            })
+
+    print("NAV SAMPLE:", nav_data[:5])
+
+# ============================================================
+# 7. MF PORTFOLIO (PDF PARSER)
+# ============================================================
+
+def parse_mf_portfolio(pdf_path):
+    import tabula
+
+    tables = tabula.read_pdf(pdf_path, pages="all")
+
+    holdings = []
+    for table in tables:
+        for _, row in table.iterrows():
+            holdings.append({
+                "stock": row.get("Name"),
+                "allocation": row.get("% to Net Assets")
+            })
+
+    print("MF HOLDINGS:", holdings[:5])
+
+# ============================================================
+# 8. RBI EXCHANGE RATES
+# ============================================================
+
+def fetch_rbi_rates():
+    url = "https://www.rbi.org.in/scripts/ReferenceRateArchive.aspx"
+    tables = pd.read_html(url)
+    df = tables[0]
+
+    print("RBI RATES:", df.head())
+
+# ============================================================
+# TASK REGISTRATION (FREQUENCY CONTROL)
+# ============================================================
+
+# High frequency
+register_task(fetch_stock_prices, 1800)       # 30 min
+register_task(fetch_corporate_actions, 7200)  # 2 hr
+
+# Low frequency
+register_task(fetch_fundamentals, 86400)      # daily
+register_task(fetch_nav, 86400)               # daily
+register_task(fetch_rbi_rates, 86400)         # daily
+
+# ============================================================
+# START ENGINE
+# ============================================================
+
+if __name__ == "__main__":
+    scheduler()

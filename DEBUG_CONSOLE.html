@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: monospace; background: #0a0e27; color: #00ff00; margin: 0; padding: 20px; }
+        .debug-container { max-width: 1200px; margin: 0 auto; }
+        .debug-header { background: #1a1f3a; padding: 15px; border: 2px solid #00ff00; margin-bottom: 20px; border-radius: 4px; }
+        .debug-section { background: #0f1419; border: 1px solid #00ff00; padding: 15px; margin-bottom: 10px; border-radius: 4px; }
+        .debug-log { background: #000; color: #0f0; padding: 10px; max-height: 400px; overflow-y: auto; border: 1px solid #0f0; margin-top: 10px; font-size: 12px; }
+        .log-line { margin: 3px 0; }
+        .log-error { color: #ff0000; }
+        .log-warn { color: #ffaa00; }
+        .log-success { color: #00ff00; }
+        .log-info { color: #00aaff; }
+        button { background: #00ff00; color: #000; border: none; padding: 8px 16px; cursor: pointer; margin: 5px 0; font-family: monospace; font-weight: bold; border-radius: 3px; }
+        button:hover { background: #00dd00; }
+        .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; }
+        .status-card { background: #1a1f3a; padding: 15px; border-left: 3px solid #00ff00; }
+        .status-card.error { border-left-color: #ff0000; }
+        .status-card.warn { border-left-color: #ffaa00; }
+    </style>
+</head>
+<body>
+    <div class="debug-container">
+        <div class="debug-header">
+            <h1>SANCHAY OS - DEBUG CONSOLE</h1>
+            <p>Real-time diagnostics and button interaction tracking</p>
+        </div>
+
+        <div class="debug-section">
+            <h2>Initialization Status</h2>
+            <div class="status-grid">
+                <div class="status-card" id="status-dom">
+                    <strong>DOM Ready:</strong> <span id="status-dom-text">Checking...</span>
+                </div>
+                <div class="status-card" id="status-api">
+                    <strong>API Online:</strong> <span id="status-api-text">Checking...</span>
+                </div>
+                <div class="status-card" id="status-js">
+                    <strong>JavaScript:</strong> <span id="status-js-text">Checking...</span>
+                </div>
+                <div class="status-card" id="status-init">
+                    <strong>App Init:</strong> <span id="status-init-text">Checking...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="debug-section">
+            <h2>Global State</h2>
+            <button onclick="dumpGlobalState()">Dump GLOBAL_STATE</button>
+            <button onclick="dumpIASData()">Dump IAS_DATA</button>
+            <button onclick="checkFunctions()">Check Functions</button>
+            <button onclick="testAPI()">Test API Connection</button>
+            <button onclick="manualShowScreen('s-clients')">Manual: Show Clients Screen</button>
+            <button onclick="manualShowScreen('s-dashboard')">Manual: Show Dashboard</button>
+            <div class="debug-log" id="state-log"></div>
+        </div>
+
+        <div class="debug-section">
+            <h2>Event Monitoring</h2>
+            <p>All button clicks and navigation events will appear below:</p>
+            <div class="debug-log" id="event-log"></div>
+        </div>
+
+        <div class="debug-section">
+            <h2>Console Output</h2>
+            <div class="debug-log" id="console-log"></div>
+        </div>
+    </div>
+
+    <script>
+        const logs = {
+            events: [],
+            console: [],
+            state: []
+        };
+
+        // Intercept console.log
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            logs.console.push({ type: 'log', msg: args.join(' '), time: new Date().toLocaleTimeString() });
+            updateLogs();
+        };
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            logs.console.push({ type: 'error', msg: args.join(' '), time: new Date().toLocaleTimeString() });
+            updateLogs();
+        };
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            logs.console.push({ type: 'warn', msg: args.join(' '), time: new Date().toLocaleTimeString() });
+            updateLogs();
+        };
+
+        // Global error handler
+        window.onerror = function(msg, url, line, col, error) {
+            logs.console.push({ type: 'error', msg: `${msg} at ${url}:${line}:${col}`, time: new Date().toLocaleTimeString(), error });
+            updateLogs();
+        };
+
+        // Document-level click tracking
+        document.addEventListener('click', function(event) {
+            const target = event.target;
+            const id = target.id || 'unknown';
+            const text = target.textContent || target.innerHTML;
+            logs.events.push({ id, text: text.substring(0, 50), time: new Date().toLocaleTimeString(), elem: target.tagName });
+            updateLogs();
+        }, true);
+
+        function updateLogs() {
+            // Update console log
+            const consoleLog = document.getElementById('console-log');
+            if (consoleLog) {
+                consoleLog.innerHTML = logs.console.map(l => {
+                    const cls = l.type === 'error' ? 'log-error' : l.type === 'warn' ? 'log-warn' : 'log-info';
+                    return `<div class="log-line ${cls}">[${l.time}] ${l.type.toUpperCase()}: ${l.msg}</div>`;
+                }).join('');
+                consoleLog.scrollTop = consoleLog.scrollHeight;
+            }
+
+            // Update event log
+            const eventLog = document.getElementById('event-log');
+            if (eventLog) {
+                eventLog.innerHTML = logs.events.map(e => {
+                    return `<div class="log-line log-info">[${e.time}] ${e.elem} #${e.id}: "${e.text}"</div>`;
+                }).join('');
+                eventLog.scrollTop = eventLog.scrollHeight;
+            }
+
+            // Update state log
+            const stateLog = document.getElementById('state-log');
+            if (stateLog) {
+                stateLog.innerHTML = logs.state.map(s => {
+                    return `<div class="log-line log-success">${s}</div>`;
+                }).join('');
+                stateLog.scrollTop = stateLog.scrollHeight;
+            }
+        }
+
+        function addLog(msg, type = 'info') {
+            logs.state.push(msg);
+            updateLogs();
+        }
+
+        function checkInitStatus() {
+            // Check DOM
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                document.getElementById('status-dom-text').textContent = '✓ READY';
+                document.getElementById('status-dom').classList.remove('error');
+            } else {
+                document.getElementById('status-dom-text').textContent = '✗ NOT READY';
+                document.getElementById('status-dom').classList.add('error');
+            }
+
+            // Check API
+            fetch('http://localhost:8001/health')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.status === 'ok') {
+                        document.getElementById('status-api-text').textContent = '✓ ONLINE';
+                        document.getElementById('status-api').classList.remove('error', 'warn');
+                    }
+                })
+                .catch(e => {
+                    document.getElementById('status-api-text').textContent = '✗ OFFLINE';
+                    document.getElementById('status-api').classList.add('error');
+                    addLog('ERROR: API not responding - ' + e.message, 'error');
+                });
+
+            // Check JavaScript
+            document.getElementById('status-js-text').textContent = '✓ ACTIVE';
+            document.getElementById('status-js').classList.remove('error');
+
+            // Check init
+            if (typeof init !== 'undefined') {
+                document.getElementById('status-init-text').textContent = '✓ DEFINED';
+            } else {
+                document.getElementById('status-init-text').textContent = '✗ NOT FOUND';
+                document.getElementById('status-init').classList.add('error');
+            }
+        }
+
+        function dumpGlobalState() {
+            if (typeof GLOBAL_STATE !== 'undefined') {
+                addLog('GLOBAL_STATE: ' + JSON.stringify(GLOBAL_STATE, null, 2));
+            } else {
+                addLog('ERROR: GLOBAL_STATE not defined', 'error');
+            }
+        }
+
+        function dumpIASData() {
+            if (typeof IAS_DATA !== 'undefined') {
+                const summary = {
+                    totalClients: IAS_DATA.totalClients,
+                    totalAUM: IAS_DATA.totalAUM,
+                    clientsArray: Array.isArray(IAS_DATA.clients) ? IAS_DATA.clients.length + ' items' : 'Not an array',
+                    goalsArray: Array.isArray(IAS_DATA.goals) ? IAS_DATA.goals.length + ' items' : 'Not an array',
+                    tasks: Array.isArray(IAS_DATA.tasks) ? IAS_DATA.tasks.length + ' items' : 'Not an array'
+                };
+                addLog('IAS_DATA Summary: ' + JSON.stringify(summary, null, 2));
+            } else {
+                addLog('ERROR: IAS_DATA not defined', 'error');
+            }
+        }
+
+        function checkFunctions() {
+            const funcs = ['init', 'showScreen', 'openModal', 'setupNavigation', 'setupToggles', 'apiFetch', 'loadClientsFromAPI'];
+            const results = funcs.map(f => typeof window[f] !== 'undefined' ? `✓ ${f}` : `✗ ${f}`).join(', ');
+            addLog('Functions: ' + results);
+        }
+
+        function testAPI() {
+            fetch('http://localhost:8001/clients')
+                .then(r => r.json())
+                .then(d => {
+                    addLog('SUCCESS: API /clients returned ' + (Array.isArray(d) ? d.length + ' clients' : 'invalid response'));
+                })
+                .catch(e => {
+                    addLog('ERROR: API test failed - ' + e.message, 'error');
+                });
+        }
+
+        function manualShowScreen(screenId) {
+            if (typeof showScreen !== 'undefined') {
+                try {
+                    showScreen(screenId);
+                    addLog('Manually showed screen: ' + screenId);
+                } catch (e) {
+                    addLog('ERROR calling showScreen: ' + e.message, 'error');
+                }
+            } else {
+                addLog('ERROR: showScreen not defined', 'error');
+            }
+        }
+
+        // Check status on load
+        window.addEventListener('load', checkInitStatus);
+        setTimeout(checkInitStatus, 1000);
+    </script>
+</body>
+</html>
