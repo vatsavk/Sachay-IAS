@@ -23,7 +23,8 @@ class TestCompleteClientOnboardingWorkflow:
         }
         advisor_resp = api_client.post('/users', json=advisor_data)
         assert advisor_resp.status_code == 200
-        advisor_id = advisor_resp.json()['user_id']
+        with sanchay_db.get_connection() as conn:
+            advisor_id = conn.execute('SELECT advisor_id FROM advisors LIMIT 1').fetchone()['advisor_id']
         
         # Step 2: Onboard client
         client_data = {
@@ -98,7 +99,8 @@ class TestCompleteClientOnboardingWorkflow:
             'email': 'adv@test.io',
             'role': 'advisor'
         })
-        advisor_id = advisor_resp.json()['user_id']
+        with sanchay_db.get_connection() as conn:
+            advisor_id = conn.execute('SELECT advisor_id FROM advisors LIMIT 1').fetchone()['advisor_id']
         
         onboard_resp = api_client.post('/onboard_client', json={
             'name': 'Client',
@@ -156,7 +158,8 @@ class TestTaskManagementWorkflow:
             'email': 'advisor@test.io',
             'role': 'advisor'
         })
-        advisor_id = advisor_resp.json()['user_id']
+        with sanchay_db.get_connection() as conn:
+            advisor_id = conn.execute('SELECT advisor_id FROM advisors LIMIT 1').fetchone()['advisor_id']
         
         onboard_resp = api_client.post('/onboard_client', json={
             'name': 'Client',
@@ -226,7 +229,8 @@ class TestDataRelationshipIntegrity:
             'email': 'senior@test.io',
             'role': 'advisor'
         })
-        advisor_id = advisor_resp.json()['user_id']
+        with sanchay_db.get_connection() as conn:
+            advisor_id = conn.execute('SELECT advisor_id FROM advisors LIMIT 1').fetchone()['advisor_id']
         
         # Onboard multiple clients with this advisor
         client_ids = []

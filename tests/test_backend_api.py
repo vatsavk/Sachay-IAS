@@ -226,17 +226,18 @@ class TestTaskAPI:
     
     def test_create_task(self, api_client, sample_user_data, sample_client_data, sample_task_data, seeded_db):
         """Test creating a task"""
-        # Create advisor
-        user_resp = api_client.post('/users', json=sample_user_data)
-        user_id = user_resp.json()['user_id']
-        
+        # Fetch the pre-seeded advisor from the DB
+        with sanchay_db.get_connection() as conn:
+            advisor_id = conn.execute('SELECT advisor_id FROM advisors LIMIT 1').fetchone()['advisor_id']
+            
         # Create/onboard client
+        sample_client_data['advisor_id'] = advisor_id
         onboard_resp = api_client.post('/onboard_client', json=sample_client_data)
         client_id = onboard_resp.json()['client_id']
         
         # Create task
         task_payload = sample_task_data.copy()
-        task_payload['advisor_id'] = 1
+        task_payload['advisor_id'] = advisor_id
         task_payload['client_id'] = client_id
         
         response = api_client.post('/tasks', json=task_payload)
@@ -266,9 +267,10 @@ class TestTaskAPI:
     def test_task_with_various_priorities(self, api_client, sample_user_data, sample_client_data, seeded_db):
         """Test creating tasks with different priorities"""
         # Setup
-        user_resp = api_client.post('/users', json=sample_user_data)
-        user_id = user_resp.json()['user_id']
-        
+        with sanchay_db.get_connection() as conn:
+            advisor_id = conn.execute('SELECT advisor_id FROM advisors LIMIT 1').fetchone()['advisor_id']
+            
+        sample_client_data['advisor_id'] = advisor_id
         onboard_resp = api_client.post('/onboard_client', json=sample_client_data)
         client_id = onboard_resp.json()['client_id']
         
@@ -276,7 +278,7 @@ class TestTaskAPI:
         
         for priority in priorities:
             task_payload = {
-                'advisor_id': user_id,
+                'advisor_id': advisor_id,
                 'client_id': client_id,
                 'task_type': f'Task_{priority}',
                 'priority': priority,
