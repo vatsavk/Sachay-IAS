@@ -57,6 +57,34 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
+import sqlite3
+
+@app.exception_handler(sqlite3.IntegrityError)
+async def sqlite_integrity_handler(request: Request, exc: sqlite3.IntegrityError):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "Database constraint violation (e.g. duplicate entry or missing reference)."},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+if getattr(sanchay_db, 'HAS_PSYCOPG2', False):
+    import psycopg2
+    @app.exception_handler(psycopg2.IntegrityError)
+    async def postgres_integrity_handler(request: Request, exc: psycopg2.IntegrityError):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Database constraint violation (e.g. duplicate entry or missing reference)."},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+
 # ── PYDANTIC MODELS ──────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
