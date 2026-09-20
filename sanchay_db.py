@@ -232,6 +232,17 @@ def init_database(path=DB_PATH):
         ''')
 
         conn.execute('''
+            CREATE TABLE IF NOT EXISTS email_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipient TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NOT NULL,
+                error_message TEXT
+            );
+        ''')
+
+        conn.execute('''
             CREATE TABLE IF NOT EXISTS meeting_minutes (
                 minutes_id   INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id    INTEGER NOT NULL REFERENCES clients(client_id) ON DELETE CASCADE,
