@@ -590,13 +590,25 @@ def generate_report(client_id: int, report_type: str = 'Portfolio Review'):
     import os
     
     # Generate the PDF bytes
-    pdf_bytes = report_generator.generate_client_statement(client_id)
+    try:
+        pdf_bytes = report_generator.generate_client_statement(client_id)
+        # If this takes >30s, we need to revisit this architecture
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except TimeoutError:
+        return {"error": "Report generation timed out. Try again later.", "status": 202}
+        
     if not pdf_bytes:
         raise HTTPException(status_code=404, detail="Client not found or insufficient data for report.")
         
     os.makedirs('static/reports', exist_ok=True)
     report_filename = f"report_{client_id}_{int(datetime.now().timestamp())}.pdf"
     report_path = f"static/reports/{report_filename}"
+    
+    # TODO: Implement PDF garbage collection before production scale.
+    # PDFs are saved to static/reports/ indefinitely.
+    # At scale, this will fill disk. Add cron job to delete PDFs >30 days old.
+    # Tracked in: README.md "Known Limitations"
     with open(report_path, "wb") as f:
         f.write(pdf_bytes)
         

@@ -61,6 +61,9 @@ def generate_client_statement(client_id: int, target_advisor_id=None) -> bytes:
             ORDER BY total_value DESC
         ''', (client_id,)).fetchall()
         
+        if not holdings:
+            raise ValueError("No holdings available to generate report")
+        
         # Header
         elements.append(Paragraph("Sanchay IAS", title_style))
         elements.append(Paragraph("Monthly Wealth Statement", title_style))
