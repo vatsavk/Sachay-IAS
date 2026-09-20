@@ -649,17 +649,34 @@ def get_minutes(user=Depends(get_current_user)):
 # ── CLIENT SELF-SERVICE ───────────────────────────────────────────
 
 @app.get('/my/portfolio', response_model=dict)
-def get_my_portfolio(user=Depends(get_current_user)):
-    if user['role'] != 'client':
-        raise HTTPException(403, 'Clients only')
+def get_my_portfolio(client_id: Optional[int] = None, user=Depends(get_current_user)):
+    if user['role'] == 'client':
+        target_client_id = user.get('client_id')
+    else:
+        if not client_id:
+            raise HTTPException(400, "Advisors must specify a client_id")
+        target_client_id = client_id
+        
     with sanchay_db.get_connection() as conn:
-        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.user_id=?', (user['user_id'],)).fetchone()
+        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.client_id=?', (target_client_id,)).fetchone()
         if not client_row:
             raise HTTPException(404, 'Client record not found')
-        client_id = client_row['client_id']
-        portfolio = conn.execute('SELECT * FROM portfolios WHERE client_id=?', (client_id,)).fetchall()
-        goals     = conn.execute('SELECT * FROM goals WHERE client_id=?', (client_id,)).fetchall()
-        txns      = conn.execute('SELECT * FROM transactions WHERE client_id=? ORDER BY txn_date DESC LIMIT 20', (client_id,)).fetchall()
+        
+        portfolio = conn.execute('''
+            SELECT p.portfolio_name, am.asset_name, ac.category_name, h.quantity,
+                   h.avg_buy_price, COALESCE(ap.price, h.avg_buy_price) as current_price,
+                   (h.quantity * COALESCE(ap.price, h.avg_buy_price)) as current_value
+            FROM portfolios p
+            JOIN holdings h ON p.portfolio_id = h.portfolio_id
+            JOIN asset_master am ON h.asset_id = am.asset_id
+            JOIN asset_categories ac ON am.category_id = ac.category_id
+            LEFT JOIN asset_prices ap ON am.asset_id = ap.asset_id 
+                AND ap.price_id = (SELECT price_id FROM asset_prices WHERE asset_id = am.asset_id ORDER BY price_date DESC LIMIT 1)
+            WHERE p.client_id = ?
+        ''', (target_client_id,)).fetchall()
+        goals     = conn.execute('SELECT * FROM goals WHERE client_id=?', (target_client_id,)).fetchall()
+        txns      = conn.execute('SELECT * FROM transactions WHERE client_id=? ORDER BY txn_date DESC LIMIT 20', (target_client_id,)).fetchall()
+        
         return {
             'client':     dict(client_row),
             'portfolio':  [dict(r) for r in portfolio],
@@ -678,9 +695,14 @@ def get_my_notifications(user=Depends(get_current_user)):
     return []
 
 @app.get('/my/dashboard/analytics', response_model=dict)
-def get_my_dashboard_analytics(user=Depends(get_current_user)):
-    if user['role'] != 'client':
-        raise HTTPException(403, 'Clients only')
+def get_my_dashboard_analytics(client_id: Optional[int] = None, user=Depends(get_current_user)):
+    if user['role'] == 'client':
+        target_client_id = user.get('client_id')
+    else:
+        if not client_id:
+            raise HTTPException(400, "Advisors must specify a client_id to preview portal")
+        target_client_id = client_id
+
     import math
 
     # CDF helper for normal distribution (Abramowitz & Stegun 7.1.26)
@@ -695,11 +717,11 @@ def get_my_dashboard_analytics(user=Depends(get_current_user)):
         return (1.0 + erf(x / math.sqrt(2.0))) / 2.0
 
     with sanchay_db.get_connection() as conn:
-        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.user_id=?', (user['user_id'],)).fetchone()
+        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.client_id=?', (target_client_id,)).fetchone()
         if not client_row:
             raise HTTPException(404, 'Client record not found')
-        client_id = client_row['client_id']
         
+        client_id = target_client_id
         # 1. Allocation
         allocation_rows = sanchay_db.get_client_holdings_valuation(client_id)
         

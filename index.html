@@ -14,6 +14,7 @@
   <script src="frontend/sanchay_command.js"></script>
   <script src="frontend/sanchay_density.js"></script>
   <script src="frontend/sanchay_canvas.js"></script>
+  <script src="frontend/client_portal.js"></script>
 </head>
 <body>
 
@@ -1374,7 +1375,52 @@
     <div class="screen" id="s-ai-copilot"></div>
 
     <!-- ── CLIENT PORTAL SCREEN ──────────────────────────── -->
-    <div class="screen" id="s-client-portal"></div>
+    <div class="screen" id="s-client-portal">
+      <div class="page-header">
+        <div>
+          <div class="page-title">My Wealth Portal</div>
+          <div class="page-sub">Your personal financial overview</div>
+        </div>
+      </div>
+      <div class="stats-grid" id="cp-stats">
+        <div class="stat-card gold">
+          <div class="stat-icon gold">💰</div>
+          <div class="stat-val" id="cp-net-worth">Loading...</div>
+          <div class="stat-label">Total Net Worth</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-icon green">📈</div>
+          <div class="stat-val" id="cp-returns">--</div>
+          <div class="stat-label">Lifetime Returns</div>
+        </div>
+        <div class="stat-card blue">
+          <div class="stat-icon blue">🎯</div>
+          <div class="stat-val" id="cp-goals">--</div>
+          <div class="stat-label">Goals on Track</div>
+        </div>
+      </div>
+      
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+        <div class="card">
+          <div class="card-header"><span class="card-title">My Holdings</span></div>
+          <table class="data-table">
+            <thead><tr><th>Asset</th><th>Category</th><th>Current Value</th></tr></thead>
+            <tbody id="cp-holdings-tbody">
+               <tr><td colspan="3" style="text-align:center;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">My Goals</span></div>
+          <table class="data-table">
+            <thead><tr><th>Goal</th><th>Target Amount</th><th>Status</th></tr></thead>
+            <tbody id="cp-mygoals-tbody">
+               <tr><td colspan="3" style="text-align:center;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <!-- ── PLATFORM ADMIN SCREEN ─────────────────────────── -->
     <div class="screen" id="s-platform-admin"></div>
@@ -1632,6 +1678,55 @@ async function api(endpoint, opts = {}) {
     if (e.message !== 'Failed to fetch') toast(e.message || 'Request failed', 'error');
     return null;
   }
+}
+
+/* ── WEBSOCKETS ───────────────────────────────────────── */
+let ws;
+function initWebSocket() {
+  if (ws) return;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws/market_data`;
+  
+  ws = new WebSocket(wsUrl);
+  ws.onopen = () => console.log('WebSocket connected');
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'market_update') {
+        const priceCells = document.querySelectorAll(`.ws-price-cell[data-asset-name="${data.asset_name}"]`);
+        const valueCells = document.querySelectorAll(`.ws-value-cell[data-asset-name="${data.asset_name}"]`);
+        
+        priceCells.forEach(el => {
+          const oldPrice = parseFloat(el.textContent.replace(/[^0-9.-]+/g, ''));
+          el.textContent = '₹' + data.price.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          
+          if (data.price > oldPrice) {
+             el.style.color = 'var(--green)';
+             setTimeout(() => el.style.color = '', 1000);
+          } else if (data.price < oldPrice) {
+             el.style.color = 'var(--red)';
+             setTimeout(() => el.style.color = '', 1000);
+          }
+        });
+        
+        valueCells.forEach(el => {
+          const qty = parseFloat(el.getAttribute('data-qty'));
+          const newVal = qty * data.price;
+          el.textContent = crore(newVal);
+          
+          el.style.color = 'var(--gold-t)';
+          setTimeout(() => el.style.color = '', 1000);
+        });
+      }
+    } catch(err) {
+      console.error('WS Error:', err);
+    }
+  };
+  ws.onclose = () => {
+    console.log('WebSocket closed. Reconnecting in 5s...');
+    ws = null;
+    setTimeout(initWebSocket, 5000);
+  };
 }
 
 /* ── NAVIGATION ───────────────────────────────────────── */
@@ -2114,8 +2209,8 @@ async function loadClient360Data(clientId) {
         <td><span class="tag blue">${h.category}</span></td>
         <td style="font-family:var(--mono)">${h.quantity.toFixed(2)}</td>
         <td style="font-family:var(--mono)">₹${(h.avg_buy_price).toLocaleString('en-IN')}</td>
-        <td style="font-family:var(--mono)">₹${(h.current_price).toLocaleString('en-IN')}</td>
-        <td style="font-family:var(--mono);font-weight:700">${crore(h.current_value)}</td>
+        <td style="font-family:var(--mono)" class="ws-price-cell" data-asset-name="${h.asset_name}">₹${(h.current_price).toLocaleString('en-IN')}</td>
+        <td style="font-family:var(--mono);font-weight:700" class="ws-value-cell" data-asset-name="${h.asset_name}" data-qty="${h.quantity}">${crore(h.current_value)}</td>
         <td style="font-family:var(--mono);color:var(--gold-t)">${h.allocation_percent}%</td>
         <td style="color:var(--t2)">${h.sector}</td>
       </tr>
