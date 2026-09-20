@@ -905,3 +905,10 @@ body[data-screen="s-goal-workflow"] #s-goal-workflow {
 .event-title { font-size: 14px; font-weight: 800; color: var(--c-gold); margin-bottom: 6px; }
 .event-desc  { font-size: 11px; color: var(--c-text2); line-height: 1.6; margin-bottom: 12px; }
 .event-meta  { display: flex; justify-content: space-between; align-items: center; }
+
+/* ── WEBSOCKET ANIMATIONS ────────────────────────────────────────────── */
+.ws-price-cell, .ws-value-cell {
+  transition: color 0.5s ease-out;
+}
+.ws-flash-up { color: var(--green) !important; font-weight: bold; }
+.ws-flash-down { color: var(--red) !important; font-weight: bold; }
