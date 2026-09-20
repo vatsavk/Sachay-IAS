@@ -661,6 +661,9 @@ def get_my_portfolio(client_id: Optional[int] = None, user=Depends(get_current_u
         client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.client_id=?', (target_client_id,)).fetchone()
         if not client_row:
             raise HTTPException(404, 'Client record not found')
+            
+        if user['role'] == 'advisor' and client_row['advisor_id'] != user.get('advisor_id'):
+            raise HTTPException(403, "Unauthorized: You do not manage this client")
         
         portfolio = conn.execute('''
             SELECT p.portfolio_name, am.asset_name, ac.category_name, h.quantity,
@@ -720,6 +723,9 @@ def get_my_dashboard_analytics(client_id: Optional[int] = None, user=Depends(get
         client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.client_id=?', (target_client_id,)).fetchone()
         if not client_row:
             raise HTTPException(404, 'Client record not found')
+            
+        if user['role'] == 'advisor' and client_row['advisor_id'] != user.get('advisor_id'):
+            raise HTTPException(403, "Unauthorized: You do not manage this client")
         
         client_id = target_client_id
         # 1. Allocation
