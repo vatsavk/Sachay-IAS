@@ -1,9 +1,13 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import uvicorn
 import sanchay_db
+import asyncio
+import notifications
+import random
+import json
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from contextlib import asynccontextmanager
@@ -30,10 +34,72 @@ def require_write(user=Depends(get_current_user)):
         raise HTTPException(403, 'Write access not permitted')
     return user
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
+async def mock_market_data_simulator():
+    while True:
+        await asyncio.sleep(5)
+        try:
+            with sanchay_db.get_connection() as conn:
+                # Pick a random asset from asset_master
+                asset = conn.execute("SELECT asset_id, asset_name FROM asset_master ORDER BY RANDOM() LIMIT 1").fetchone()
+                if asset:
+                    # Get its last price or default to 100
+                    last_price_row = conn.execute(
+                        "SELECT price FROM asset_prices WHERE asset_id=? ORDER BY price_date DESC LIMIT 1",
+                        (asset['asset_id'],)
+                    ).fetchone()
+                    last_price = float(last_price_row['price']) if last_price_row else 100.0
+                    
+                    # Jitter price by -1% to +1%
+                    jitter = random.uniform(-0.01, 0.01)
+                    new_price = last_price * (1 + jitter)
+                    
+                    from datetime import datetime
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    conn.execute(
+                        "INSERT INTO asset_prices (asset_id, price, price_date, source) VALUES (?, ?, ?, 'MOCK_WS')",
+                        (asset['asset_id'], new_price, now_str)
+                    )
+                    conn.commit()
+                    
+                    # Broadcast the update
+                    msg = json.dumps({
+                        "type": "market_update",
+                        "asset_id": asset['asset_id'],
+                        "asset_name": asset['asset_name'],
+                        "price": round(new_price, 2)
+                    })
+                    await manager.broadcast(msg)
+        except Exception as e:
+            print(f"[WS Simulator Error] {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     sanchay_db.init_database()
+    task = asyncio.create_task(mock_market_data_simulator())
     yield
+    task.cancel()
 
 app = FastAPI(title='SANCHAY API', version='2.0', lifespan=lifespan)
 
@@ -278,13 +344,25 @@ def get_client(client_id: int, user=Depends(get_current_user)):
     raise HTTPException(status_code=404, detail='Client not found')
 
 @app.post('/onboard_client', response_model=dict)
-def onboard_client(payload: ClientOnboard, user=Depends(require_write)):
+def onboard_client(payload: ClientOnboard, background_tasks: BackgroundTasks, user=Depends(require_write)):
     try:
         user_id = sanchay_db.ensure_user(payload.name, payload.email, payload.phone, role='client', status='active')
         client_id = sanchay_db.create_client(
             user_id, payload.advisor_id, payload.dob,
             payload.income, payload.net_worth, payload.occupation, payload.onboarding_date
         )
+        
+        advisor_name = "Your Advisor"
+        if payload.advisor_id:
+            with sanchay_db.get_connection() as conn:
+                adv = conn.execute("SELECT u.name FROM users u JOIN advisors a ON u.user_id=a.user_id WHERE a.advisor_id=?", (payload.advisor_id,)).fetchone()
+                if adv: advisor_name = adv['name']
+                
+        background_tasks.add_task(
+            notifications.send_onboarding_email, 
+            payload.email, payload.name, advisor_name
+        )
+        
         return {'client_id': client_id, 'user_id': user_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -380,12 +458,21 @@ def list_tasks(user=Depends(get_current_user)):
     return sanchay_db.list_tasks_by_advisor(advisor_id) if advisor_id else []
 
 @app.post('/tasks', response_model=dict)
-def add_task(payload: TaskCreate, user=Depends(require_write)):
+def add_task(payload: TaskCreate, background_tasks: BackgroundTasks, user=Depends(require_write)):
     task_id = sanchay_db.create_task(
         payload.advisor_id, payload.client_id, payload.task_type,
         payload.priority, payload.due_date, payload.status,
         payload.owner_id, payload.category, payload.description
     )
+    
+    with sanchay_db.get_connection() as conn:
+        client_row = conn.execute("SELECT u.email, u.name FROM users u JOIN clients c ON u.user_id=c.user_id WHERE c.client_id=?", (payload.client_id,)).fetchone()
+        if client_row and client_row['email']:
+            background_tasks.add_task(
+                notifications.send_task_notification,
+                client_row['email'], client_row['name'], payload.task_type
+            )
+            
     return {'task_id': task_id}
 
 # ── TRANSACTIONS ─────────────────────────────────────────────────
@@ -4106,6 +4193,17 @@ def trigger_data_sync(integration_id: Optional[int] = None, user=Depends(require
 
     return {'status': 'success', 'message': msg, 'triggered_at': import_date_str()}
 
+# ── WEBSOCKETS ───────────────────────────────────────────────────
+
+@app.websocket("/ws/market_data")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # We just push data, so we can ignore or respond
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 # ── MAIN ─────────────────────────────────────────────────────────
 
