@@ -583,16 +583,35 @@ def get_reports():
         return [dict(r) for r in rows]
 
 @app.post('/reports', response_model=dict)
-def generate_report(client_id: Optional[int] = None, report_type: str = 'Portfolio Review'):
-    """Generate a new report cache entry."""
+def generate_report(client_id: int, report_type: str = 'Portfolio Review'):
+    """Generate a new report cache entry with actual PDF."""
     import json
     from datetime import datetime
+    import os
+    
+    # Generate the PDF bytes
+    pdf_bytes = report_generator.generate_client_statement(client_id)
+    if not pdf_bytes:
+        raise HTTPException(status_code=404, detail="Client not found or insufficient data for report.")
+        
+    os.makedirs('static/reports', exist_ok=True)
+    report_filename = f"report_{client_id}_{int(datetime.now().timestamp())}.pdf"
+    report_path = f"static/reports/{report_filename}"
+    with open(report_path, "wb") as f:
+        f.write(pdf_bytes)
+        
+    report_url = f"/static/reports/{report_filename}"
+        
     with sanchay_db.get_connection() as conn:
         cur = conn.execute('''
             INSERT INTO report_cache (client_id, report_type, report_data)
             VALUES (?, ?, ?)
-        ''', (client_id, report_type, json.dumps({'status': 'generated', 'timestamp': datetime.now().isoformat()})))
-        return {'report_id': cur.lastrowid, 'status': 'generated'}
+        ''', (client_id, report_type, json.dumps({
+            'status': 'generated', 
+            'timestamp': datetime.now().isoformat(),
+            'url': report_url
+        })))
+        return {'report_id': cur.lastrowid, 'status': 'generated', 'url': report_url}
 
 # ── MEETING MINUTES ──────────────────────────────────────────────
 

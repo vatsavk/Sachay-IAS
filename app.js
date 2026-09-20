@@ -131,9 +131,12 @@ async function syncFromAPI() {
 
   if (reports.value && Array.isArray(reports.value) && reports.value.length > 0) {
     IAS_DATA.reports = reports.value.map(r => ({
+      id: r.report_id,
+      client_id: r.client_id,
       type: r.report_type, freq: 'On-Demand',
       last: r.generated_at ? r.generated_at.split('T')[0] : '—',
-      client: r.client_name || 'All Clients', status: 'Ready'
+      client: r.client_name || 'All Clients', status: 'Ready',
+      url: r.report_data ? (JSON.parse(r.report_data).url || null) : null
     }));
   }
 
@@ -757,12 +760,27 @@ function renderReportsScreen() {
       <td style='color:var(--c-text2)'>${r.freq}</td>
       <td class='num'>${r.last}</td>
       <td><span class='tag ${r.status === 'Ready' ? 'green' : 'gray'}'>${r.status || 'READY'}</span></td>
-      <td><button class='btn btn-ghost btn-xs'>Generate</button></td>
+      <td>
+        ${r.url ? `<a href="${SANCHAY_API_BASE}${r.url}" target="_blank" class='btn btn-ghost btn-xs'>Download</a>` : `<button class='btn btn-ghost btn-xs' onclick="generatePdfReport(${r.client_id}, '${r.type}')">Generate</button>`}
+      </td>
     </tr>
   `).join('');
   } catch (e) {
     console.error('Error rendering reports:', e);
     tbody.innerHTML = '<tr><td colspan="6">Error loading reports</td></tr>';
+  }
+}
+
+async function generatePdfReport(clientId, reportType) {
+  try {
+    const res = await apiFetch(`/reports?client_id=${clientId}&report_type=${reportType}`, { method: 'POST' });
+    if (res && res.url) {
+      alert("Report generated successfully!");
+      window.open(SANCHAY_API_BASE + res.url, '_blank');
+      if (shouldRefresh()) syncFromAPI();
+    }
+  } catch (err) {
+    alert("Error generating report: " + err.message);
   }
 }
 
