@@ -4,6 +4,10 @@ from email.mime.multipart import MIMEMultipart
 import os
 import asyncio
 from typing import Optional
+import sanchay_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 SMTP_SERVER = os.getenv("SMTP_SERVER", "localhost")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "1025")) # Default to MailHog or local test server
@@ -21,6 +25,9 @@ def _send_email_sync(to_email: str, subject: str, body: str, html_body: Optional
     if html_body:
         msg.attach(MIMEText(html_body, "html"))
 
+    status = 'success'
+    error_message = None
+
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             if SMTP_USER and SMTP_PASS:
@@ -28,8 +35,19 @@ def _send_email_sync(to_email: str, subject: str, body: str, html_body: Optional
             server.send_message(msg)
         print(f"[Notifications] Email sent to {to_email}: {subject}")
     except Exception as e:
+        status = 'failed'
+        error_message = str(e)
+        logger.error(f"Failed to send email to {to_email}: {e}")
         print(f"[Notifications] Failed to send email to {to_email}: {e}")
-        # In a real app we'd log this or queue it for retry. We'll fail silently here for resilience.
+    finally:
+        try:
+            with sanchay_db.get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO email_logs (recipient, subject, status, error_message) VALUES (?, ?, ?, ?)",
+                    (to_email, subject, status, error_message)
+                )
+        except Exception as db_e:
+            logger.error(f"Failed to log email to DB: {db_e}")
 
 async def send_email(to_email: str, subject: str, body: str, html_body: Optional[str] = None):
     """Asynchronously send an email so as not to block the API."""
