@@ -4289,7 +4289,9 @@ import os
 
 # Mount the current directory for static files (at the end so API routes take precedence)
 # This allows opening http://localhost:8001/index.html to work correctly
-app.mount("/", StaticFiles(directory=".", html=True), name="static")
+from pathlib import Path
+static_dir = Path(__file__).resolve().parent
+app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
 
 if __name__ == '__main__':
     import uvicorn
