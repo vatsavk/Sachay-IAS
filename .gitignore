@@ -121,3 +121,11 @@ build/
 *.backup
 tmp/
 temp/
+
+# Generated Test Reports & Logs
+server_start.log
+test_report.html
+test_syntax.html
+TEST_REPORT_VISUAL.html
+test_report_comprehensive.html
+test_report.json

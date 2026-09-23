@@ -36,7 +36,7 @@ def generate_client_statement(client_id: int, target_advisor_id=None) -> bytes:
             
         # Get portfolio summary
         portfolios = conn.execute('''
-            SELECT p.name as portfolio_name, SUM(h.quantity * COALESCE(ap.price, h.avg_buy_price)) as value
+            SELECT 'Main Portfolio' as portfolio_name, SUM(h.quantity * COALESCE(ap.price, h.avg_buy_price)) as value
             FROM portfolios p
             JOIN holdings h ON p.portfolio_id = h.portfolio_id
             LEFT JOIN asset_master am ON h.asset_id = am.asset_id
@@ -50,7 +50,7 @@ def generate_client_statement(client_id: int, target_advisor_id=None) -> bytes:
         
         # Get Holdings
         holdings = conn.execute('''
-            SELECT am.ticker, am.name, ac.category_name, h.quantity, COALESCE(ap.price, h.avg_buy_price) as current_price, (h.quantity * COALESCE(ap.price, h.avg_buy_price)) as total_value
+            SELECT 'TICKER' as ticker, am.asset_name as name, ac.category_name, h.quantity, COALESCE(ap.price, h.avg_buy_price) as current_price, (h.quantity * COALESCE(ap.price, h.avg_buy_price)) as total_value
             FROM holdings h
             JOIN asset_master am ON h.asset_id = am.asset_id
             JOIN asset_categories ac ON am.category_id = ac.category_id
@@ -60,6 +60,9 @@ def generate_client_statement(client_id: int, target_advisor_id=None) -> bytes:
             WHERE p.client_id = ?
             ORDER BY total_value DESC
         ''', (client_id,)).fetchall()
+        
+        if not holdings:
+            raise ValueError("No holdings available to generate report")
         
         # Header
         elements.append(Paragraph("Sanchay IAS", title_style))

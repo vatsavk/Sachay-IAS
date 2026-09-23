@@ -1,9 +1,13 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import uvicorn
 import sanchay_db
+import asyncio
+import notifications
+import random
+import json
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from contextlib import asynccontextmanager
@@ -30,10 +34,72 @@ def require_write(user=Depends(get_current_user)):
         raise HTTPException(403, 'Write access not permitted')
     return user
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
+async def mock_market_data_simulator():
+    while True:
+        await asyncio.sleep(5)
+        try:
+            with sanchay_db.get_connection() as conn:
+                # Pick a random asset from asset_master
+                asset = conn.execute("SELECT asset_id, asset_name FROM asset_master ORDER BY RANDOM() LIMIT 1").fetchone()
+                if asset:
+                    # Get its last price or default to 100
+                    last_price_row = conn.execute(
+                        "SELECT price FROM asset_prices WHERE asset_id=? ORDER BY price_date DESC LIMIT 1",
+                        (asset['asset_id'],)
+                    ).fetchone()
+                    last_price = float(last_price_row['price']) if last_price_row else 100.0
+                    
+                    # Jitter price by -1% to +1%
+                    jitter = random.uniform(-0.01, 0.01)
+                    new_price = last_price * (1 + jitter)
+                    
+                    from datetime import datetime
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    conn.execute(
+                        "INSERT INTO asset_prices (asset_id, price, price_date, source) VALUES (?, ?, ?, 'MOCK_WS')",
+                        (asset['asset_id'], new_price, now_str)
+                    )
+                    conn.commit()
+                    
+                    # Broadcast the update
+                    msg = json.dumps({
+                        "type": "market_update",
+                        "asset_id": asset['asset_id'],
+                        "asset_name": asset['asset_name'],
+                        "price": round(new_price, 2)
+                    })
+                    await manager.broadcast(msg)
+        except Exception as e:
+            print(f"[WS Simulator Error] {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     sanchay_db.init_database()
+    task = asyncio.create_task(mock_market_data_simulator())
     yield
+    task.cancel()
 
 app = FastAPI(title='SANCHAY API', version='2.0', lifespan=lifespan)
 
@@ -56,6 +122,34 @@ async def global_exception_handler(request: Request, exc: Exception):
             "Access-Control-Allow-Headers": "*",
         }
     )
+
+import sqlite3
+
+@app.exception_handler(sqlite3.IntegrityError)
+async def sqlite_integrity_handler(request: Request, exc: sqlite3.IntegrityError):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "Database constraint violation (e.g. duplicate entry or missing reference)."},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+if getattr(sanchay_db, 'HAS_PSYCOPG2', False):
+    import psycopg2
+    @app.exception_handler(psycopg2.IntegrityError)
+    async def postgres_integrity_handler(request: Request, exc: psycopg2.IntegrityError):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Database constraint violation (e.g. duplicate entry or missing reference)."},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
 
 # ── PYDANTIC MODELS ──────────────────────────────────────────────
 
@@ -250,13 +344,25 @@ def get_client(client_id: int, user=Depends(get_current_user)):
     raise HTTPException(status_code=404, detail='Client not found')
 
 @app.post('/onboard_client', response_model=dict)
-def onboard_client(payload: ClientOnboard, user=Depends(require_write)):
+def onboard_client(payload: ClientOnboard, background_tasks: BackgroundTasks, user=Depends(require_write)):
     try:
         user_id = sanchay_db.ensure_user(payload.name, payload.email, payload.phone, role='client', status='active')
         client_id = sanchay_db.create_client(
             user_id, payload.advisor_id, payload.dob,
             payload.income, payload.net_worth, payload.occupation, payload.onboarding_date
         )
+        
+        advisor_name = "Your Advisor"
+        if payload.advisor_id:
+            with sanchay_db.get_connection() as conn:
+                adv = conn.execute("SELECT u.name FROM users u JOIN advisors a ON u.user_id=a.user_id WHERE a.advisor_id=?", (payload.advisor_id,)).fetchone()
+                if adv: advisor_name = adv['name']
+                
+        background_tasks.add_task(
+            notifications.send_onboarding_email, 
+            payload.email, payload.name, advisor_name
+        )
+        
         return {'client_id': client_id, 'user_id': user_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -352,12 +458,21 @@ def list_tasks(user=Depends(get_current_user)):
     return sanchay_db.list_tasks_by_advisor(advisor_id) if advisor_id else []
 
 @app.post('/tasks', response_model=dict)
-def add_task(payload: TaskCreate, user=Depends(require_write)):
+def add_task(payload: TaskCreate, background_tasks: BackgroundTasks, user=Depends(require_write)):
     task_id = sanchay_db.create_task(
         payload.advisor_id, payload.client_id, payload.task_type,
         payload.priority, payload.due_date, payload.status,
         payload.owner_id, payload.category, payload.description
     )
+    
+    with sanchay_db.get_connection() as conn:
+        client_row = conn.execute("SELECT u.email, u.name FROM users u JOIN clients c ON u.user_id=c.user_id WHERE c.client_id=?", (payload.client_id,)).fetchone()
+        if client_row and client_row['email']:
+            background_tasks.add_task(
+                notifications.send_task_notification,
+                client_row['email'], client_row['name'], payload.task_type
+            )
+            
     return {'task_id': task_id}
 
 # ── TRANSACTIONS ─────────────────────────────────────────────────
@@ -468,16 +583,47 @@ def get_reports():
         return [dict(r) for r in rows]
 
 @app.post('/reports', response_model=dict)
-def generate_report(client_id: Optional[int] = None, report_type: str = 'Portfolio Review'):
-    """Generate a new report cache entry."""
+def generate_report(client_id: int, report_type: str = 'Portfolio Review'):
+    """Generate a new report cache entry with actual PDF."""
     import json
     from datetime import datetime
+    import os
+    
+    # Generate the PDF bytes
+    try:
+        pdf_bytes = report_generator.generate_client_statement(client_id)
+        # If this takes >30s, we need to revisit this architecture
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except TimeoutError:
+        return {"error": "Report generation timed out. Try again later.", "status": 202}
+        
+    if not pdf_bytes:
+        raise HTTPException(status_code=404, detail="Client not found or insufficient data for report.")
+        
+    os.makedirs('static/reports', exist_ok=True)
+    report_filename = f"report_{client_id}_{int(datetime.now().timestamp())}.pdf"
+    report_path = f"static/reports/{report_filename}"
+    
+    # TODO: Implement PDF garbage collection before production scale.
+    # PDFs are saved to static/reports/ indefinitely.
+    # At scale, this will fill disk. Add cron job to delete PDFs >30 days old.
+    # Tracked in: README.md "Known Limitations"
+    with open(report_path, "wb") as f:
+        f.write(pdf_bytes)
+        
+    report_url = f"/static/reports/{report_filename}"
+        
     with sanchay_db.get_connection() as conn:
         cur = conn.execute('''
             INSERT INTO report_cache (client_id, report_type, report_data)
             VALUES (?, ?, ?)
-        ''', (client_id, report_type, json.dumps({'status': 'generated', 'timestamp': datetime.now().isoformat()})))
-        return {'report_id': cur.lastrowid, 'status': 'generated'}
+        ''', (client_id, report_type, json.dumps({
+            'status': 'generated', 
+            'timestamp': datetime.now().isoformat(),
+            'url': report_url
+        })))
+        return {'report_id': cur.lastrowid, 'status': 'generated', 'url': report_url}
 
 # ── MEETING MINUTES ──────────────────────────────────────────────
 
@@ -515,17 +661,37 @@ def get_minutes(user=Depends(get_current_user)):
 # ── CLIENT SELF-SERVICE ───────────────────────────────────────────
 
 @app.get('/my/portfolio', response_model=dict)
-def get_my_portfolio(user=Depends(get_current_user)):
-    if user['role'] != 'client':
-        raise HTTPException(403, 'Clients only')
+def get_my_portfolio(client_id: Optional[int] = None, user=Depends(get_current_user)):
+    if user['role'] == 'client':
+        target_client_id = user.get('client_id')
+    else:
+        if not client_id:
+            raise HTTPException(400, "Advisors must specify a client_id")
+        target_client_id = client_id
+        
     with sanchay_db.get_connection() as conn:
-        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.user_id=?', (user['user_id'],)).fetchone()
+        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.client_id=?', (target_client_id,)).fetchone()
         if not client_row:
             raise HTTPException(404, 'Client record not found')
-        client_id = client_row['client_id']
-        portfolio = conn.execute('SELECT * FROM portfolios WHERE client_id=?', (client_id,)).fetchall()
-        goals     = conn.execute('SELECT * FROM goals WHERE client_id=?', (client_id,)).fetchall()
-        txns      = conn.execute('SELECT * FROM transactions WHERE client_id=? ORDER BY txn_date DESC LIMIT 20', (client_id,)).fetchall()
+            
+        if user['role'] == 'advisor' and client_row['advisor_id'] != user.get('advisor_id'):
+            raise HTTPException(403, "Unauthorized: You do not manage this client")
+        
+        portfolio = conn.execute('''
+            SELECT p.portfolio_name, am.asset_name, ac.category_name, h.quantity,
+                   h.avg_buy_price, COALESCE(ap.price, h.avg_buy_price) as current_price,
+                   (h.quantity * COALESCE(ap.price, h.avg_buy_price)) as current_value
+            FROM portfolios p
+            JOIN holdings h ON p.portfolio_id = h.portfolio_id
+            JOIN asset_master am ON h.asset_id = am.asset_id
+            JOIN asset_categories ac ON am.category_id = ac.category_id
+            LEFT JOIN asset_prices ap ON am.asset_id = ap.asset_id 
+                AND ap.price_id = (SELECT price_id FROM asset_prices WHERE asset_id = am.asset_id ORDER BY price_date DESC LIMIT 1)
+            WHERE p.client_id = ?
+        ''', (target_client_id,)).fetchall()
+        goals     = conn.execute('SELECT * FROM goals WHERE client_id=?', (target_client_id,)).fetchall()
+        txns      = conn.execute('SELECT * FROM transactions WHERE client_id=? ORDER BY txn_date DESC LIMIT 20', (target_client_id,)).fetchall()
+        
         return {
             'client':     dict(client_row),
             'portfolio':  [dict(r) for r in portfolio],
@@ -544,9 +710,14 @@ def get_my_notifications(user=Depends(get_current_user)):
     return []
 
 @app.get('/my/dashboard/analytics', response_model=dict)
-def get_my_dashboard_analytics(user=Depends(get_current_user)):
-    if user['role'] != 'client':
-        raise HTTPException(403, 'Clients only')
+def get_my_dashboard_analytics(client_id: Optional[int] = None, user=Depends(get_current_user)):
+    if user['role'] == 'client':
+        target_client_id = user.get('client_id')
+    else:
+        if not client_id:
+            raise HTTPException(400, "Advisors must specify a client_id to preview portal")
+        target_client_id = client_id
+
     import math
 
     # CDF helper for normal distribution (Abramowitz & Stegun 7.1.26)
@@ -561,11 +732,14 @@ def get_my_dashboard_analytics(user=Depends(get_current_user)):
         return (1.0 + erf(x / math.sqrt(2.0))) / 2.0
 
     with sanchay_db.get_connection() as conn:
-        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.user_id=?', (user['user_id'],)).fetchone()
+        client_row = conn.execute('SELECT c.*, u.name, u.email, u.phone FROM clients c JOIN users u ON c.user_id=u.user_id WHERE c.client_id=?', (target_client_id,)).fetchone()
         if not client_row:
             raise HTTPException(404, 'Client record not found')
-        client_id = client_row['client_id']
+            
+        if user['role'] == 'advisor' and client_row['advisor_id'] != user.get('advisor_id'):
+            raise HTTPException(403, "Unauthorized: You do not manage this client")
         
+        client_id = target_client_id
         # 1. Allocation
         allocation_rows = sanchay_db.get_client_holdings_valuation(client_id)
         
@@ -4078,6 +4252,17 @@ def trigger_data_sync(integration_id: Optional[int] = None, user=Depends(require
 
     return {'status': 'success', 'message': msg, 'triggered_at': import_date_str()}
 
+# ── WEBSOCKETS ───────────────────────────────────────────────────
+
+@app.websocket("/ws/market_data")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # We just push data, so we can ignore or respond
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 # ── MAIN ─────────────────────────────────────────────────────────
 

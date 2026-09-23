@@ -23,8 +23,7 @@ sanchay_ias/
 │   ├── sentinel.js            # Monitoring
 │   ├── data.js                # Fallback data
 │   ├── styles.css             # Styling
-│   ├── assets/                # Static assets
-│   └── test_render.js         # Test utilities
+│   └── assets/                # Static assets
 ├── tests/                      # Test suite
 │   ├── conftest.py            # pytest configuration
 │   ├── test_backend_api.py    # API tests
@@ -337,6 +336,20 @@ For issues or questions:
 2. Review test files for usage examples
 3. Check GitHub Issues
 4. Contact: [support email]
+
+---
+
+## ⚠️ Known Limitations (MVP)
+
+- **PDF storage**: Reports are generated synchronously and saved to `static/reports/`. 
+  No automatic cleanup is configured. Before production scale, implement a cron job 
+  to delete PDFs older than 30 days, or move storage to cloud (S3, etc.).
+- **Report generation**: Currently synchronous. For portfolios with >500 holdings, 
+  generation may exceed API timeout. Future: move to `BackgroundTasks` with job queue.
+- **Notification reliability**: Email notifications are sent asynchronously via local SMTP. 
+  If the SMTP server is unavailable, failures are logged to `app.log` but do not block 
+  the API. For production, integrate a third-party service (SendGrid, AWS SES) 
+  with retry logic.
 
 ---
 

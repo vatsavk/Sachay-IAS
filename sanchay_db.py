@@ -10,8 +10,12 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 IS_POSTGRES = bool(DATABASE_URL and DATABASE_URL.startswith('postgres'))
 
 if IS_POSTGRES:
-    import psycopg2
-    from psycopg2.extras import DictCursor
+    try:
+        import psycopg2
+        from psycopg2.extras import DictCursor
+        HAS_PSYCOPG2 = True
+    except ImportError:
+        HAS_PSYCOPG2 = False
 
 def translate_query(query):
     if not IS_POSTGRES:
@@ -168,7 +172,7 @@ def init_database(path=DB_PATH):
         conn.execute('''
             CREATE TABLE IF NOT EXISTS clients (
                 client_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
                 advisor_id INTEGER REFERENCES advisors(advisor_id) ON DELETE SET NULL,
                 dob DATE,
                 income NUMERIC,
@@ -224,6 +228,17 @@ def init_database(path=DB_PATH):
                 content TEXT,
                 consent_status TEXT DEFAULT 'pending',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS email_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipient TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NOT NULL,
+                error_message TEXT
             );
         ''')
 

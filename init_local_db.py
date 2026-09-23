@@ -307,6 +307,17 @@ def build_database(path=DB_PATH):
     ''')
 
     cur.execute('''
+    CREATE TABLE email_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipient TEXT,
+        subject TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status TEXT,
+        error_message TEXT
+    );
+    ''')
+
+    cur.execute('''
     CREATE TABLE workflows (
         workflow_id INTEGER PRIMARY KEY AUTOINCREMENT,
         workflow_name TEXT,

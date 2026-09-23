@@ -160,7 +160,7 @@ DEBUG=False
 | [README.md](README.md) | Overview and full setup guide |
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | All API endpoints with examples |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production deployment options |
-| [CLEANUP_SUMMARY.md](CLEANUP_SUMMARY.md) | What was reorganized and why |
+| [CLEANUP_SUMMARY.md](docs/refactoring/CLEANUP_SUMMARY.md) | What was reorganized and why |
 
 ---
 
