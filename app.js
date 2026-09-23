@@ -280,6 +280,21 @@ async function init() {
   if (isInitializing) return;
   isInitializing = true;
 
+  try {
+    const featureRes = await fetch(API_BASE + '/features', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    });
+    if (featureRes.ok) {
+      const features = await featureRes.json();
+      if (!features.FEATURE_CLIENT_PORTAL_ENABLED) {
+        const portalBtn = document.querySelector('button[data-screen="s-client-portal"]');
+        if (portalBtn) portalBtn.style.display = 'none';
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch features', e);
+  }
+
   const renderSteps = [
     { name: 'Navigation', fn: setupNavigation },
     { name: 'Toggles', fn: setupToggles },

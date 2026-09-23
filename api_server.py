@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from contextlib import asynccontextmanager
 import report_generator
+import os
 
+FEATURE_CLIENT_PORTAL_ENABLED = os.environ.get("FEATURE_CLIENT_PORTAL_ENABLED", "false").lower() == "true"
 from auth import (
     hash_password, verify_password, create_access_token, decode_token,
     has_firm_wide_access, can_write, normalize_role
@@ -245,11 +247,18 @@ def login(payload: LoginRequest):
         'redirect': redirect_url
     }
 
-# ── HEALTH ───────────────────────────────────────────────────────
+# ── HEALTH & CONFIG ───────────────────────────────────────────────
 
 @app.get('/health')
-def health_check():
-    return {'status': 'ok', 'version': '2.0'}
+def health():
+    return {'status': 'ok'}
+
+@app.get('/features')
+def get_features():
+    return {
+        'FEATURE_CLIENT_PORTAL_ENABLED': FEATURE_CLIENT_PORTAL_ENABLED,
+        'version': '2.0'
+    }
 
 # ── DASHBOARD AGGREGATE ──────────────────────────────────────────
 
@@ -662,6 +671,9 @@ def get_minutes(user=Depends(get_current_user)):
 
 @app.get('/my/portfolio', response_model=dict)
 def get_my_portfolio(client_id: Optional[int] = None, user=Depends(get_current_user)):
+    if not FEATURE_CLIENT_PORTAL_ENABLED:
+        raise HTTPException(403, "Client portal is not enabled.")
+
     if user['role'] == 'client':
         target_client_id = user.get('client_id')
     else:
@@ -701,6 +713,9 @@ def get_my_portfolio(client_id: Optional[int] = None, user=Depends(get_current_u
 
 @app.get('/my/notifications', response_model=List[dict])
 def get_my_notifications(user=Depends(get_current_user)):
+    if not FEATURE_CLIENT_PORTAL_ENABLED:
+        raise HTTPException(403, "Client portal is not enabled.")
+        
     if user['role'] != 'client':
         return sanchay_db.list_notifications()
     with sanchay_db.get_connection() as conn:
@@ -711,6 +726,9 @@ def get_my_notifications(user=Depends(get_current_user)):
 
 @app.get('/my/dashboard/analytics', response_model=dict)
 def get_my_dashboard_analytics(client_id: Optional[int] = None, user=Depends(get_current_user)):
+    if not FEATURE_CLIENT_PORTAL_ENABLED:
+        raise HTTPException(403, "Client portal is not enabled.")
+
     if user['role'] == 'client':
         target_client_id = user.get('client_id')
     else:
