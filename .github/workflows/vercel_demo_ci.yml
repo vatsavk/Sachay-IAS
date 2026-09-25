@@ -22,15 +22,14 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install -r vercel_demo/requirements.txt
+          pip install -r requirements.txt
 
       - name: Start server
         env:
           DEBUG_ALLOW: '1'
           ADMIN_PASSWORD: 'ci-test-pass'
         run: |
-          cd vercel_demo
-          python -u run_uvicorn.py &
+          python -m uvicorn api_server:app --port 8000 &
           # wait for server to be ready (max 30s)
           for i in {1..30}; do
             if curl -sS http://127.0.0.1:8000/health >/dev/null; then

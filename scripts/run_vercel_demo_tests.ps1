@@ -9,12 +9,12 @@ if (-not (Test-Path $VenvPath)) {
 }
 
 & $VenvPath\Scripts\python.exe -m pip install --upgrade pip
-& $VenvPath\Scripts\python.exe -m pip install -r vercel_demo\requirements.txt
+& $VenvPath\Scripts\python.exe -m pip install -r requirements.txt
 
 Write-Host "Starting vercel_demo..."
 $env:DEBUG_ALLOW = '1'
 $env:ADMIN_PASSWORD = 'local-test-pass'
-Start-Process -FilePath $VenvPath\Scripts\python.exe -ArgumentList 'vercel_demo/run_uvicorn.py' -NoNewWindow
+Start-Process -FilePath $VenvPath\Scripts\python.exe -ArgumentList '-m', 'uvicorn', 'api_server:app', '--port', "$Port" -NoNewWindow
 
 Write-Host "Waiting for server to start on port $Port (max 30s)"
 $ok = $false
