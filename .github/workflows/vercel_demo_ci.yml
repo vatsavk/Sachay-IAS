@@ -1,0 +1,47 @@
+name: vercel_demo CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  vercel-demo-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r vercel_demo/requirements.txt
+
+      - name: Start server
+        env:
+          DEBUG_ALLOW: '1'
+          ADMIN_PASSWORD: 'ci-test-pass'
+        run: |
+          cd vercel_demo
+          python -u run_uvicorn.py &
+          # wait for server to be ready (max 30s)
+          for i in {1..30}; do
+            if curl -sS http://127.0.0.1:8000/health >/dev/null; then
+              echo "server up"; break
+            fi
+            sleep 1
+          done
+
+      - name: Run checks
+        run: |
+          echo "Health:"
+          curl -sS http://127.0.0.1:8000/health
+          echo "\nDebug status:"
+          curl -sS http://127.0.0.1:8000/debug/status || true
